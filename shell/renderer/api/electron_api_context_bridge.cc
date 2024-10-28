@@ -22,9 +22,11 @@
 #include "shell/common/gin_helper/promise.h"
 #include "shell/common/node_includes.h"
 #include "shell/common/world_ids.h"
+#include "shell/renderer/preload_realm_context.h"
 #include "third_party/blink/public/web/web_blob.h"
 #include "third_party/blink/public/web/web_element.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"  // nogncheck
 
 namespace features {
 BASE_FEATURE(kContextBridgeMutability,
@@ -383,22 +385,27 @@ v8::MaybeLocal<v8::Value> PassValueToOtherContext(
     return v8::MaybeLocal<v8::Value>(cloned_arr);
   }
 
-  // Custom logic to "clone" Element references
-  blink::WebElement elem =
-      blink::WebElement::FromV8Value(destination_context->GetIsolate(), value);
-  if (!elem.IsNull()) {
-    v8::Context::Scope destination_context_scope(destination_context);
-    return v8::MaybeLocal<v8::Value>(
-        elem.ToV8Value(destination_context->GetIsolate()));
-  }
+  // Clone certain DOM APIs only within Window contexts.
+  blink::ExecutionContext* execution_context =
+      blink::ExecutionContext::From(destination_context);
+  if (execution_context->IsWindow()) {
+    // Custom logic to "clone" Element references
+    blink::WebElement elem = blink::WebElement::FromV8Value(
+        destination_context->GetIsolate(), value);
+    if (!elem.IsNull()) {
+      v8::Context::Scope destination_context_scope(destination_context);
+      return v8::MaybeLocal<v8::Value>(
+          elem.ToV8Value(destination_context->GetIsolate()));
+    }
 
-  // Custom logic to "clone" Blob references
-  blink::WebBlob blob =
-      blink::WebBlob::FromV8Value(destination_context->GetIsolate(), value);
-  if (!blob.IsNull()) {
-    v8::Context::Scope destination_context_scope(destination_context);
-    return v8::MaybeLocal<v8::Value>(
-        blob.ToV8Value(destination_context->GetIsolate()));
+    // Custom logic to "clone" Blob references
+    blink::WebBlob blob =
+        blink::WebBlob::FromV8Value(destination_context->GetIsolate(), value);
+    if (!blob.IsNull()) {
+      v8::Context::Scope destination_context_scope(destination_context);
+      return v8::MaybeLocal<v8::Value>(
+          blob.ToV8Value(destination_context->GetIsolate()));
+    }
   }
 
   // Proxy all objects
@@ -659,24 +666,14 @@ v8::MaybeLocal<v8::Object> CreateProxyForAPI(
   }
 }
 
-void ExposeAPIInWorld(v8::Isolate* isolate,
-                      const int world_id,
-                      const std::string& key,
-                      v8::Local<v8::Value> api,
-                      gin_helper::Arguments* args) {
-  TRACE_EVENT2("electron", "ContextBridge::ExposeAPIInWorld", "key", key,
-               "worldId", world_id);
-
-  auto* render_frame = GetRenderFrame(isolate->GetCurrentContext()->Global());
-  CHECK(render_frame);
-  auto* frame = render_frame->GetWebFrame();
-  CHECK(frame);
-
-  v8::Local<v8::Context> target_context =
-      world_id == WorldIDs::MAIN_WORLD_ID
-          ? frame->MainWorldScriptContext()
-          : frame->GetScriptContextFromWorldId(isolate, world_id);
-
+void ExposeAPI(v8::Isolate* isolate,
+               v8::Local<v8::Context> source_context,
+               v8::Local<v8::Context> target_context,
+               const std::string& key,
+               v8::Local<v8::Value> api,
+               gin_helper::Arguments* args) {
+  DCHECK(!target_context.IsEmpty());
+  v8::Context::Scope target_context_scope(target_context);
   gin_helper::Dictionary global(target_context->GetIsolate(),
                                 target_context->Global());
 
@@ -687,33 +684,80 @@ void ExposeAPIInWorld(v8::Isolate* isolate,
     return;
   }
 
-  v8::Local<v8::Context> electron_isolated_context =
-      frame->GetScriptContextFromWorldId(args->isolate(),
-                                         WorldIDs::ISOLATED_WORLD_ID);
+  context_bridge::ObjectCache object_cache;
 
-  {
-    context_bridge::ObjectCache object_cache;
-    v8::Context::Scope target_context_scope(target_context);
+  v8::MaybeLocal<v8::Value> maybe_proxy = PassValueToOtherContext(
+      source_context, target_context, api, source_context->Global(),
+      &object_cache, false, 0, BridgeErrorTarget::kSource);
+  if (maybe_proxy.IsEmpty())
+    return;
+  auto proxy = maybe_proxy.ToLocalChecked();
 
-    v8::MaybeLocal<v8::Value> maybe_proxy = PassValueToOtherContext(
-        electron_isolated_context, target_context, api,
-        electron_isolated_context->Global(), &object_cache, false, 0,
-        BridgeErrorTarget::kSource);
-    if (maybe_proxy.IsEmpty())
-      return;
-    auto proxy = maybe_proxy.ToLocalChecked();
-
-    if (base::FeatureList::IsEnabled(features::kContextBridgeMutability)) {
-      global.Set(key, proxy);
-      return;
-    }
-
-    if (proxy->IsObject() && !proxy->IsTypedArray() &&
-        !DeepFreeze(proxy.As<v8::Object>(), target_context))
-      return;
-
-    global.SetReadOnlyNonConfigurable(key, proxy);
+  if (base::FeatureList::IsEnabled(features::kContextBridgeMutability)) {
+    global.Set(key, proxy);
+    return;
   }
+
+  if (proxy->IsObject() && !proxy->IsTypedArray() &&
+      !DeepFreeze(proxy.As<v8::Object>(), target_context))
+    return;
+
+  global.SetReadOnlyNonConfigurable(key, proxy);
+}
+
+// Attempt to get the target context based on the current context.
+//
+// For render frames, this is either the main world (0) or an arbitrary
+// world ID. For service workers, Electron only supports one isolated
+// context and the main worker context. Anything else is invalid.
+v8::MaybeLocal<v8::Context> GetTargetContext(v8::Isolate* isolate,
+                                             const int world_id) {
+  v8::Local<v8::Context> source_context = isolate->GetCurrentContext();
+  v8::MaybeLocal<v8::Context> maybe_target_context;
+
+  blink::ExecutionContext* execution_context =
+      blink::ExecutionContext::From(source_context);
+  if (execution_context->IsWindow()) {
+    auto* render_frame = GetRenderFrame(source_context->Global());
+    CHECK(render_frame);
+    auto* frame = render_frame->GetWebFrame();
+    CHECK(frame);
+
+    maybe_target_context =
+        world_id == WorldIDs::MAIN_WORLD_ID
+            ? frame->MainWorldScriptContext()
+            : frame->GetScriptContextFromWorldId(isolate, world_id);
+  } else if (execution_context->IsShadowRealmGlobalScope()) {
+    if (world_id != WorldIDs::MAIN_WORLD_ID) {
+      isolate->ThrowException(v8::Exception::Error(gin::StringToV8(
+          isolate, "Isolated worlds are not supported in preload realms.")));
+      return maybe_target_context;
+    }
+    maybe_target_context =
+        electron::preload_realm::GetInitiatorContext(source_context);
+  } else {
+    NOTREACHED();
+  }
+
+  CHECK(!maybe_target_context.IsEmpty());
+  return maybe_target_context;
+}
+
+void ExposeAPIInWorld(v8::Isolate* isolate,
+                      const int world_id,
+                      const std::string& key,
+                      v8::Local<v8::Value> api,
+                      gin_helper::Arguments* args) {
+  TRACE_EVENT2("electron", "ContextBridge::ExposeAPIInWorld", "key", key,
+               "worldId", world_id);
+  v8::Local<v8::Context> source_context = isolate->GetCurrentContext();
+  CHECK(!source_context.IsEmpty());
+  v8::MaybeLocal<v8::Context> maybe_target_context =
+      GetTargetContext(isolate, world_id);
+  if (maybe_target_context.IsEmpty())
+    return;
+  v8::Local<v8::Context> target_context = maybe_target_context.ToLocalChecked();
+  ExposeAPI(isolate, source_context, target_context, key, api, args);
 }
 
 gin_helper::Dictionary TraceKeyPath(const gin_helper::Dictionary& start,
@@ -810,13 +854,137 @@ bool OverrideGlobalPropertyFromIsolatedWorld(
   }
 }
 
+// Determine if the current context is the main world context.
 bool IsCalledFromMainWorld(v8::Isolate* isolate) {
-  auto* render_frame = GetRenderFrame(isolate->GetCurrentContext()->Global());
-  CHECK(render_frame);
-  auto* frame = render_frame->GetWebFrame();
-  CHECK(frame);
-  v8::Local<v8::Context> main_context = frame->MainWorldScriptContext();
-  return isolate->GetCurrentContext() == main_context;
+  v8::Local<v8::Context> source_context = isolate->GetCurrentContext();
+  auto* ec = blink::ExecutionContext::From(source_context);
+  if (ec->IsWindow()) {
+    auto* render_frame = GetRenderFrame(source_context->Global());
+    CHECK(render_frame);
+    auto* frame = render_frame->GetWebFrame();
+    CHECK(frame);
+    v8::Local<v8::Context> main_context = frame->MainWorldScriptContext();
+    return source_context == main_context;
+  } else if (ec->IsShadowRealmGlobalScope()) {
+    return false;
+  } else if (ec->IsServiceWorkerGlobalScope()) {
+    return true;
+  } else {
+    NOTREACHED();
+  }
+}
+
+// Clones a value into the target context.
+v8::MaybeLocal<v8::Value> CloneValueToContext(
+    v8::Isolate* isolate,
+    v8::Local<v8::Value> value,
+    v8::Local<v8::Context> target_context,
+    std::string& error_message) {
+  // Objects with prototype chains need to be protected and thus cloned.
+  // Primitive values are fine as is.
+  if (!value->IsObject()) {
+    return value;
+  }
+
+  v8::Local<v8::Object> object_value = value.As<v8::Object>();
+  v8::Local<v8::Context> creation_context =
+      object_value->GetCreationContextChecked();
+
+  // Value created in the same context are safe.
+  if (target_context == creation_context) {
+    return object_value;
+  }
+
+  // Attempt to clone value.
+  v8::MaybeLocal<v8::Value> maybe_result;
+  {
+    v8::TryCatch try_catch(isolate);
+    context_bridge::ObjectCache object_cache;
+    maybe_result =
+        PassValueToOtherContext(creation_context, target_context, object_value,
+                                creation_context->Global(), &object_cache,
+                                false, 0, BridgeErrorTarget::kSource);
+    if (try_catch.HasCaught()) {
+      v8::String::Utf8Value utf8(isolate, try_catch.Exception());
+      error_message = *utf8 ? *utf8 : "Unknown error cloning result";
+    }
+  }
+
+  return maybe_result;
+}
+
+// Evaluate a script in the target world ID. The script is executed
+// synchronously and clones the result into the calling context.
+v8::Local<v8::Value> EvaluateInWorld(v8::Isolate* isolate,
+                                     const int world_id,
+                                     const std::string& source,
+                                     gin_helper::Arguments* args) {
+  v8::Local<v8::Context> source_context = isolate->GetCurrentContext();
+  v8::Context::Scope source_scope(source_context);
+
+  // Get the target context
+  v8::MaybeLocal<v8::Context> maybe_target_context =
+      GetTargetContext(isolate, world_id);
+  v8::Local<v8::Context> target_context;
+  if (!maybe_target_context.ToLocal(&target_context)) {
+    isolate->ThrowException(v8::Exception::Error(
+        gin::StringToV8(isolate, "Unknown error")));  // TODO
+    return v8::Local<v8::Value>();
+  }
+
+  // Compile the script
+  v8::MaybeLocal<v8::Script> maybe_script;
+  std::string error_message = "Unknown error during script compilation";
+  {
+    v8::Context::Scope target_scope(target_context);
+    v8::TryCatch try_catch(isolate);
+    maybe_script =
+        v8::Script::Compile(target_context, gin::StringToV8(isolate, source));
+    if (try_catch.HasCaught()) {
+      // Must throw outside of TryCatch scope
+      v8::String::Utf8Value error(isolate, try_catch.Exception());
+      error_message =
+          *error ? *error : "Unknown error during script compilation";
+    }
+  }
+  v8::Local<v8::Script> script;
+  if (!maybe_script.ToLocal(&script)) {
+    isolate->ThrowException(
+        v8::Exception::Error(gin::StringToV8(isolate, error_message)));
+    return v8::Local<v8::Value>();
+  }
+
+  // Run the script
+  v8::MaybeLocal<v8::Value> maybe_result;
+  {
+    v8::Context::Scope target_scope(target_context);
+    v8::TryCatch try_catch(isolate);
+    maybe_result = script->Run(target_context);
+    if (try_catch.HasCaught()) {
+      // Must throw outside of TryCatch scope
+      v8::String::Utf8Value error(isolate, try_catch.Exception());
+      error_message = *error ? *error : "Unknown error during script execution";
+    }
+  }
+  v8::Local<v8::Value> result;
+  if (!maybe_result.ToLocal(&result)) {
+    isolate->ThrowException(
+        v8::Exception::Error(gin::StringToV8(isolate, error_message)));
+    return v8::Local<v8::Value>();
+  }
+
+  // Clone the value into the callee/source context
+  v8::Context::Scope target_scope(target_context);
+  std::string clone_error_message;
+  v8::MaybeLocal<v8::Value> maybe_cloned_result =
+      CloneValueToContext(isolate, result, source_context, clone_error_message);
+  v8::Local<v8::Value> cloned_result;
+  if (!maybe_cloned_result.ToLocal(&cloned_result)) {
+    isolate->ThrowException(
+        v8::Exception::Error(gin::StringToV8(isolate, clone_error_message)));
+    return v8::Local<v8::Value>();
+  }
+  return cloned_result;
 }
 
 }  // namespace api
@@ -831,6 +999,7 @@ void Initialize(v8::Local<v8::Object> exports,
                 void* priv) {
   v8::Isolate* isolate = context->GetIsolate();
   gin_helper::Dictionary dict(isolate, exports);
+  dict.SetMethod("evaluateInWorld", &electron::api::EvaluateInWorld);
   dict.SetMethod("exposeAPIInWorld", &electron::api::ExposeAPIInWorld);
   dict.SetMethod("_overrideGlobalValueFromIsolatedWorld",
                  &electron::api::OverrideGlobalValueFromIsolatedWorld);

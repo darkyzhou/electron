@@ -13,11 +13,16 @@
 #include "gin/data_object_builder.h"
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
+#include "shell/browser/api/electron_api_service_worker_main.h"
 #include "shell/browser/electron_browser_context.h"
 #include "shell/browser/javascript_environment.h"
 #include "shell/common/gin_converters/gurl_converter.h"
+#include "shell/common/gin_converters/service_worker_converter.h"
 #include "shell/common/gin_converters/value_converter.h"
 #include "shell/common/gin_helper/dictionary.h"
+
+using ServiceWorkerStatus =
+    content::ServiceWorkerRunningInfo::ServiceWorkerVersionStatus;
 
 namespace electron::api {
 
@@ -72,13 +77,30 @@ gin::WrapperInfo ServiceWorkerContext::kWrapperInfo = {gin::kEmbedderNativeGin};
 ServiceWorkerContext::ServiceWorkerContext(
     v8::Isolate* isolate,
     ElectronBrowserContext* browser_context) {
-  service_worker_context_ =
-      browser_context->GetDefaultStoragePartition()->GetServiceWorkerContext();
+  storage_partition_ = browser_context->GetDefaultStoragePartition();
+  service_worker_context_ = storage_partition_->GetServiceWorkerContext();
   service_worker_context_->AddObserver(this);
 }
 
 ServiceWorkerContext::~ServiceWorkerContext() {
   service_worker_context_->RemoveObserver(this);
+}
+
+void ServiceWorkerContext::OnRunningStatusChanged(
+    int64_t version_id,
+    blink::EmbeddedWorkerStatus running_status) {
+  ServiceWorkerMain* worker =
+      ServiceWorkerMain::FromVersionID(version_id, storage_partition_);
+  if (worker)
+    worker->OnRunningStatusChanged();
+
+  v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+  v8::HandleScope scope(isolate);
+  EmitWithoutEvent("running-status-changed",
+                   gin::DataObjectBuilder(isolate)
+                       .Set("versionId", version_id)
+                       .Set("runningStatus", running_status)
+                       .Build());
 }
 
 void ServiceWorkerContext::OnReportConsoleMessage(
@@ -103,6 +125,32 @@ void ServiceWorkerContext::OnRegistrationCompleted(const GURL& scope) {
   v8::HandleScope handle_scope(isolate);
   Emit("registration-completed",
        gin::DataObjectBuilder(isolate).Set("scope", scope).Build());
+}
+
+void ServiceWorkerContext::OnVersionRedundant(int64_t version_id,
+                                              const GURL& scope) {
+  ServiceWorkerMain* worker =
+      ServiceWorkerMain::FromVersionID(version_id, storage_partition_);
+  if (worker)
+    worker->OnVersionRedundant();
+}
+
+void ServiceWorkerContext::OnVersionStartingRunning(int64_t version_id) {
+  OnRunningStatusChanged(version_id, blink::EmbeddedWorkerStatus::kStarting);
+}
+
+void ServiceWorkerContext::OnVersionStartedRunning(
+    int64_t version_id,
+    const content::ServiceWorkerRunningInfo& running_info) {
+  OnRunningStatusChanged(version_id, blink::EmbeddedWorkerStatus::kRunning);
+}
+
+void ServiceWorkerContext::OnVersionStoppingRunning(int64_t version_id) {
+  OnRunningStatusChanged(version_id, blink::EmbeddedWorkerStatus::kStopping);
+}
+
+void ServiceWorkerContext::OnVersionStoppedRunning(int64_t version_id) {
+  OnRunningStatusChanged(version_id, blink::EmbeddedWorkerStatus::kStopped);
 }
 
 void ServiceWorkerContext::OnDestruct(content::ServiceWorkerContext* context) {
@@ -138,6 +186,25 @@ v8::Local<v8::Value> ServiceWorkerContext::GetWorkerInfoFromID(
                                         std::move(iter->second));
 }
 
+v8::Local<v8::Value> ServiceWorkerContext::FromVersionID(
+    gin_helper::ErrorThrower thrower,
+    int64_t version_id) {
+  return ServiceWorkerMain::From(thrower.isolate(), service_worker_context_,
+                                 storage_partition_, version_id)
+      .ToV8();
+}
+
+// static
+gin::Handle<ServiceWorkerMain> ServiceWorkerContext::FromVersionIDIfExists(
+    v8::Isolate* isolate,
+    int64_t version_id) {
+  ServiceWorkerMain* worker =
+      ServiceWorkerMain::FromVersionID(version_id, storage_partition_);
+  if (!worker)
+    return gin::Handle<ServiceWorkerMain>();
+  return gin::CreateHandle(isolate, worker);
+}
+
 // static
 gin::Handle<ServiceWorkerContext> ServiceWorkerContext::Create(
     v8::Isolate* isolate,
@@ -153,8 +220,10 @@ gin::ObjectTemplateBuilder ServiceWorkerContext::GetObjectTemplateBuilder(
              ServiceWorkerContext>::GetObjectTemplateBuilder(isolate)
       .SetMethod("getAllRunning",
                  &ServiceWorkerContext::GetAllRunningWorkerInfo)
-      .SetMethod("getFromVersionID",
-                 &ServiceWorkerContext::GetWorkerInfoFromID);
+      .SetMethod("getFromVersionID", &ServiceWorkerContext::GetWorkerInfoFromID)
+      .SetMethod("fromVersionID", &ServiceWorkerContext::FromVersionID)
+      .SetMethod("_fromVersionIDIfExists",
+                 &ServiceWorkerContext::FromVersionIDIfExists);
 }
 
 const char* ServiceWorkerContext::GetTypeName() {

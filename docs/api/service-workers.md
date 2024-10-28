@@ -56,6 +56,17 @@ Returns:
 
 Emitted when a service worker has been registered. Can occur after a call to [`navigator.serviceWorker.register('/sw.js')`](https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerContainer/register) successfully resolves or when a Chrome extension is loaded.
 
+#### Event: 'running-status-changed' _Experimental_
+
+Returns:
+
+* `details` Event\<\>
+  * `versionId` number - ID of the updated service worker version
+  * `runningStatus` string - Running status.
+    Possible values include `starting`, `running`, `stopping`, or `stopped`.
+
+Emitted when a service worker's running status has changed.
+
 ### Instance Methods
 
 The following methods are available on instances of `ServiceWorkers`:
@@ -66,8 +77,14 @@ Returns `Record<number, ServiceWorkerInfo>` - A [ServiceWorkerInfo](structures/s
 
 #### `serviceWorkers.getFromVersionID(versionId)`
 
-* `versionId` number
+* `versionId` number - ID of the service worker version
 
 Returns [`ServiceWorkerInfo`](structures/service-worker-info.md) - Information about this service worker
 
 If the service worker does not exist or is not running this method will throw an exception.
+
+#### `serviceWorkers.fromVersionID(versionId)` _Experimental_
+
+* `versionId` number - ID of the service worker version
+
+Returns [`ServiceWorkerMain | undefined`](service-worker-main.md) - Instance of the service worker associated with the given version ID.

@@ -66,5 +66,9 @@
   {
     "patch_dir": "src/electron/patches/skia",
     "repo": "src/third_party/skia"
+  },
+  {
+    "patch_dir": "src/electron/patches/breakpad",
+    "repo": "src/third_party/breakpad/breakpad"
   }
 ]

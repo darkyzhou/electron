@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: darkyzhou <me@zqy.io>
+Date: Sun, 14 Dec 2025 13:19:11 +0000
+Subject: loong64 support
+
+Signed-off-by: darkyzhou <me@zqy.io>
+
+diff --git a/src/common/linux/dump_symbols.cc b/src/common/linux/dump_symbols.cc
+index 0056bc145b8d0e7245f7e0c774cbdd7d3f87ebf7..1ca68b972d8d0d5f13a3cb18a7829e9e00211d9e 100644
+--- a/src/common/linux/dump_symbols.cc
++++ b/src/common/linux/dump_symbols.cc
+@@ -110,6 +110,10 @@ using google_breakpad::wasteful_vector;
+ #define EM_AARCH64      183
+ #endif
+ 
++#ifdef EM_LOONGARCH
++#define EM_LOONGARCH    258
++#endif
++
+ // Define ZStd compression if host machine does not include this define.
+ #ifndef ELFCOMPRESS_ZSTD
+ #define ELFCOMPRESS_ZSTD 2
+@@ -1100,6 +1104,7 @@ const char* ElfArchitecture(const typename ElfClass::Ehdr* elf_header) {
+     case EM_X86_64:     return "x86_64";
+     case EM_RISCV:      return "riscv";
+     case EM_NDS32:      return "nds32";
++    case EM_LOONGARCH:  return "loongarch64";
+     default: return nullptr;
+   }
+ }
+diff --git a/src/common/linux/memory_mapped_file.cc b/src/common/linux/memory_mapped_file.cc
+index 5e54aca5a06569d83cb248e9b5ca7d96930e5c01..203a5174a3ac1b1c2d3b9d147703730001678502 100644
+--- a/src/common/linux/memory_mapped_file.cc
++++ b/src/common/linux/memory_mapped_file.cc
+@@ -72,7 +72,8 @@ bool MemoryMappedFile::Map(const char* path, size_t offset) {
+ 
+ #if defined(__x86_64__) || defined(__aarch64__) || \
+    (defined(__mips__) && _MIPS_SIM == _ABI64) || \
+-   (defined(__riscv) && __riscv_xlen == 64)
++   (defined(__riscv) && __riscv_xlen == 64) || \
++   (defined(__loongarch__) && __loongarch_grlen == 64)
+ 
+   struct kernel_stat st;
+   if (sys_fstat(fd, &st) == -1 || st.st_size < 0) {

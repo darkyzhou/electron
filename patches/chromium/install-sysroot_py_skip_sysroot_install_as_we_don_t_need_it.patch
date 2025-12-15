@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: darkyzhou <me@zqy.io>
+Date: Sun, 14 Dec 2025 06:21:35 +0000
+Subject: install-sysroot.py: skip sysroot install as we don't need it
+
+Workaround for `Cannot call rmtree on a symbolic link` errors when running in a container
+
+Signed-off-by: darkyzhou <me@zqy.io>
+
+diff --git a/build/linux/sysroot_scripts/install-sysroot.py b/build/linux/sysroot_scripts/install-sysroot.py
+index 31589722c664daa67d7d73db2c6e87cd0cfd2bca..c2f018e1919e2e6e4cad2ff7ec75b4871623d253 100755
+--- a/build/linux/sysroot_scripts/install-sysroot.py
++++ b/build/linux/sysroot_scripts/install-sysroot.py
+@@ -127,6 +127,8 @@ def GetSysrootDict(sysroots_json_path, target_platform, target_arch):
+ 
+ 
+ def InstallSysroot(sysroots_json_path, target_platform, target_arch):
++    return
++
+     sysroot_dict = GetSysrootDict(sysroots_json_path, target_platform,
+                                   target_arch)
+     tarball_filename = sysroot_dict["Tarball"]

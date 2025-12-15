@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: darkyzhou <me@zqy.io>
+Date: Sun, 14 Dec 2025 12:37:23 +0000
+Subject: loong64 support
+
+Co-authored-by: Jiajie Chen <c@jia.je>
+
+diff --git a/include/openssl/target.h b/include/openssl/target.h
+index 8d4763d0b3d62adde571fccd77f50fb9a799089a..9b40e9581f85fcc82939fbbbae455131cfba2ecf 100644
+--- a/include/openssl/target.h
++++ b/include/openssl/target.h
+@@ -54,6 +54,8 @@
+ #define OPENSSL_32_BIT
+ #elif defined(__myriad2__)
+ #define OPENSSL_32_BIT
++#elif defined(__loongarch__) && __SIZEOF_POINTER__ == 8
++#define OPENSSL_64_BIT
+ #else
+ // The list above enumerates the platforms that BoringSSL supports. For these
+ // platforms we keep a reasonable bar of not breaking them: automated test

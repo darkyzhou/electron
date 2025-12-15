@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: darkyzhou <me@zqy.io>
+Date: Sun, 14 Dec 2025 12:37:22 +0000
+Subject: loong64 support
+
+Co-authored-by: Jiajie Chen <c@jia.je>
+
+diff --git a/src/xnnpack/common.h b/src/xnnpack/common.h
+index d9482610b68d8ea17c9b675828afc2e796c1b27b..d92962c7028dbb73204d9942333897da4a4c53da 100644
+--- a/src/xnnpack/common.h
++++ b/src/xnnpack/common.h
+@@ -80,6 +80,12 @@
+ #define XNN_ARCH_WASMRELAXEDSIMD 0
+ #endif
+ 
++#if defined(__loongarch__)
++#define XNN_ARCH_LOONGARCH 1
++#else
++#define XNN_ARCH_LOONGARCH 0
++#endif
++
+ // Define platform identification macros
+ 
+ #if defined(__ANDROID__)
+diff --git a/src/xnnpack/hardware-config.h b/src/xnnpack/hardware-config.h
+index ca0183be89e5fbbc350099e2dab1ce7ab659376f..a425827298cef0818417b4ccd9e45ed1f301a395 100644
+--- a/src/xnnpack/hardware-config.h
++++ b/src/xnnpack/hardware-config.h
+@@ -63,6 +63,9 @@ enum xnn_arch_flags {
+   xnn_arch_vsx = 1 << 0,
+   xnn_arch_vsx3 = 1 << 1,
+   xnn_arch_mma = 1 << 2,
++#elif XNN_ARCH_LOONGARCH
++  xnn_arch_lsx = 1 << 0,
++  xnn_arch_lasx = 1 << 1,
+ #elif XNN_ARCH_WASM || XNN_ARCH_WASMSIMD || XNN_ARCH_WASMRELAXEDSIMD
+   xnn_arch_wasm_is_x86 = 1 << 0,
+ #if XNN_ARCH_WASMRELAXEDSIMD

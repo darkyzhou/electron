@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: darkyzhou <me@zqy.io>
+Date: Sun, 14 Dec 2025 12:37:23 +0000
+Subject: loong64 support
+
+Co-authored-by: Jiajie Chen <c@jia.je>
+
+diff --git a/src/opts/SkOpts_SetTarget.h b/src/opts/SkOpts_SetTarget.h
+index f2debc0444cb8f5b80a0e99a2214bceaab3960c1..48c0b9de83d082e265ffb4ed433bf8b1b72dad5e 100644
+--- a/src/opts/SkOpts_SetTarget.h
++++ b/src/opts/SkOpts_SetTarget.h
+@@ -136,9 +136,10 @@
+         #define SK_OPTS_NS lasx
+         // The intrinsic from lasxintrin.h is wrapped by the __loongarch_asx macro, so we need to define it.
+         #define __loongarch_asx
++        #define __loongarch_sx
+ 
+         #if defined(__clang__)
+-          #pragma clang attribute push(__attribute__((target("lasx"))), apply_to=function)
++          #pragma clang attribute push(__attribute__((target("lsx,lasx"))), apply_to=function)
+         #endif
+ 
+     #else

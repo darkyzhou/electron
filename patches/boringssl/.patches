@@ -1,2 +1,3 @@
 expose_ripemd160.patch
 feat_expose_several_extra_cipher_functions.patch
+loong64_support.patch

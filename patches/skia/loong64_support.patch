@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: darkyzhou <me@zqy.io>
+Date: Thu, 2 Jul 2026 15:39:23 +0000
+Subject: loong64: add LoongArch64 support
+
+
+This patch wires LoongArch64 into Skia target selection for Electron Linux loong64 builds.
+
+It can be removed once the corresponding LoongArch64 support has landed upstream in Skia and Electron rolls to that version.
+
+diff --git a/src/opts/SkOpts_SetTarget.h b/src/opts/SkOpts_SetTarget.h
+index 1c4b503b5ad642fcf93f6741d02bd9d7f3adab7e..e36f67a81f3993ddcabf9272d2b73cfed664c352 100644
+--- a/src/opts/SkOpts_SetTarget.h
++++ b/src/opts/SkOpts_SetTarget.h
+@@ -136,9 +136,10 @@
+         #define SK_OPTS_NS lasx
+         // The intrinsic from lasxintrin.h is wrapped by the __loongarch_asx macro, so we need to define it.
+         #define __loongarch_asx
++        #define __loongarch_sx
+ 
+         #if defined(__clang__)
+-          #pragma clang attribute push(__attribute__((target("lasx"))), apply_to=function)
++          #pragma clang attribute push(__attribute__((target("lsx,lasx"))), apply_to=function)
+         #endif
+ 
+     #else

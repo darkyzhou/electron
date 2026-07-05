@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: darkyzhou <me@zqy.io>
+Date: Thu, 2 Jul 2026 15:39:23 +0000
+Subject: loong64: add LoongArch64 support
+
+
+This patch adds LoongArch64 hardware configuration hooks to XNNPACK for Electron Linux loong64 builds.
+
+It can be removed once the corresponding LoongArch64 support has landed upstream in XNNPACK and Electron rolls to that version.
+
+diff --git a/src/xnnpack/common.h b/src/xnnpack/common.h
+index 9e25ca85a2f104351734ad20a06b71185f732fd2..88b629a871a8b3fecffc81d818a6f77854767a5b 100644
+--- a/src/xnnpack/common.h
++++ b/src/xnnpack/common.h
+@@ -89,6 +89,12 @@
+ #define XNN_ARCH_WASMRELAXEDSIMD 0
+ #endif
+ 
++#if defined(__loongarch__)
++#define XNN_ARCH_LOONGARCH 1
++#else
++#define XNN_ARCH_LOONGARCH 0
++#endif
++
+ // Define platform identification macros
+ 
+ #if defined(__ANDROID__)
+diff --git a/src/xnnpack/hardware-config.h b/src/xnnpack/hardware-config.h
+index 6b51dba5d537208571812aebc99dbfc5574df285..13dbac9fd665f0344985254019bd23d12965663f 100644
+--- a/src/xnnpack/hardware-config.h
++++ b/src/xnnpack/hardware-config.h
+@@ -65,6 +65,9 @@ enum xnn_arch_flags {
+   xnn_arch_vsx = 1 << 0,
+   xnn_arch_vsx3 = 1 << 1,
+   xnn_arch_mma = 1 << 2,
++#elif XNN_ARCH_LOONGARCH
++  xnn_arch_lsx = 1 << 0,
++  xnn_arch_lasx = 1 << 1,
+ #elif XNN_ARCH_WASM || XNN_ARCH_WASMSIMD || XNN_ARCH_WASMRELAXEDSIMD
+   xnn_arch_wasm_is_x86 = 1 << 0,
+ #if XNN_ARCH_WASMRELAXEDSIMD

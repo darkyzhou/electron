@@ -2,11 +2,54 @@ import("//electron/build/args/all.gn")
 is_component_build = false
 is_official_build = true
 
+# Build with the native LoongArch64 toolchain from the builder image. Chromium's
+# bundled clang is x86_64 and is not usable as the main compiler here.
+custom_toolchain = "//build/toolchain/linux/unbundle:default"
+host_toolchain = "//build/toolchain/linux/unbundle:default"
+is_clang = true
+clang_base_path = "/usr"
+clang_version = "23"
+clang_use_chrome_plugins = false
+clang_use_raw_ptr_plugin = false
+clang_use_unsafe_buffers_plugin = false
+
+# The upstream Chromium PGO profile is for the official Linux build and assumes
+# Chromium's patched clang. Keep LoongArch64 native builds on the non-PGO path.
+chrome_pgo_phase = 0
+
+# LoongArch LLVM rejects -gsplit-dwarf together with linker relaxation.
+use_debug_fission = false
+
+# Chromium requires use_debug_fission=true for non-component symbol_level=2
+# builds. Keep release symbols at level 1 when using the native LoongArch clang.
+symbol_level = 1
+
+is_debug = false
+fatal_linker_warnings = false
+treat_warnings_as_errors = false
+disable_fieldtrial_testing_config = true
+
 # By default, Electron builds ffmpeg with proprietary codecs enabled. In order
 # to facilitate users who don't want to ship proprietary codecs in ffmpeg, or
 # who have an LGPL requirement to ship ffmpeg as a dynamically linked library,
 # we build ffmpeg as a shared library.
 is_component_ffmpeg = true
+ffmpeg_branding = "Chrome"
+proprietary_codecs = true
+
+link_pulseaudio = true
+use_cups = true
+use_sysroot = false
+enable_hangout_services_extension = true
+enable_widevine = false
+use_vaapi = true
+use_cfi_icall = false
+use_ozone = true
+use_system_libffi = true
+is_cfi = false
+ozone_platform_wayland = true
+ozone_platform_x11 = true
+ozone_auto_platforms = true
 
 # Electron-generated PGO profiles. The C++ profiles are resolved by Chromium's
 # standard chrome_pgo_phase = 2 machinery (patched to read Electron's state
@@ -17,3 +60,17 @@ is_component_ffmpeg = true
 # build/pgo_profiles/README.md.
 v8_builtins_profiling_log_file =
     "//electron/build/pgo_profiles/electron-v8-builtins.profile"
+
+# A space-free spelling of `rustc -V`: the value is embedded into the
+# cr_rustc_revision cfg string and spaces break rsp splitting on Chromium 150.
+rustc_version = "rustc-1.96.0-nightly-f5eca4fcf-2026-04-09"
+rust_sysroot_absolute =
+    "/usr/local/toolchains/nightly-2026-04-10-loongarch64-unknown-linux-gnu"
+rust_bindgen_root = "/usr/lib/llvm-23"
+use_lld = true
+
+# The unified system module action scans the sysroot to generate a modulemap.
+# With use_sysroot = false the sysroot path is empty and gn gen fails. Clang
+# modules are already off for this configuration (no tested sysroot), so skip
+# the unified module too.
+use_unified_system_module = false

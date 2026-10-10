@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: darkyzhou <me@zqy.io>
+Date: Sat, 29 Aug 2026 18:05:30 +0000
+Subject: loong64: add LoongArch64 support
+
+This patch adds BoringSSL target detection for Linux LoongArch64 so Electron can build against BoringSSL on loong64.
+
+It can be removed once the corresponding LoongArch64 target support has landed upstream in BoringSSL and Electron rolls to that version.
+
+diff --git a/include/openssl/target.h b/include/openssl/target.h
+index 2c03389c4880a303de1ccab54d3ab3f569fa5484..d4bcf37d5635a6f5449ee0ada85efef36714f79b 100644
+--- a/include/openssl/target.h
++++ b/include/openssl/target.h
+@@ -56,6 +56,8 @@
+ #define OPENSSL_32_BIT
+ #elif defined(__myriad2__)
+ #define OPENSSL_32_BIT
++#elif defined(__loongarch__) && __SIZEOF_POINTER__ == 8
++#define OPENSSL_64_BIT
+ #else
+ // The list above enumerates the platforms that BoringSSL supports. For these
+ // platforms we keep a reasonable bar of not breaking them: automated test

@@ -317,3 +317,4 @@ cherry-pick-d3af0ad932ca.patch
 cherry-pick-f424973cf00b.patch
 cherry-pick-c3b0bcd0d3b2.patch
 cherry-pick-de4926eaa4d8.patch
+loong64_add_loongarch64_support.patch

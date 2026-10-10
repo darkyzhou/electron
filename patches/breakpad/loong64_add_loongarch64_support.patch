@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: darkyzhou <me@zqy.io>
+Date: Sat, 29 Aug 2026 18:05:30 +0000
+Subject: loong64: add LoongArch64 support
+
+This patch adds LoongArch64 support to Breakpad's dump_syms tool, covering memory-mapped file stat handling, ELF machine recognition, and DWARF CFI register names, so Electron can generate Breakpad symbols on loong64.
+
+It can be removed once the corresponding LoongArch64 support has landed upstream in Breakpad and Electron rolls to that version.
+
+diff --git a/src/common/dwarf_cfi_to_module.cc b/src/common/dwarf_cfi_to_module.cc
+index c9f47079113a15414de4b77ea43971ef0f2f827e..397442cfa55b8a31285fb845eaf048a31bc56fbd 100644
+--- a/src/common/dwarf_cfi_to_module.cc
++++ b/src/common/dwarf_cfi_to_module.cc
+@@ -172,6 +172,21 @@ vector<std::string> DwarfCFIToModule::RegisterNames::RISCV() {
+   return MakeVector(names, sizeof(names) / sizeof(names[0]));
+ }
+ 
++vector<std::string> DwarfCFIToModule::RegisterNames::LOONG64() {
++  static const char *const names[] = {
++    "$r0",  "$r1",  "$r2",  "$r3",  "$r4",  "$r5",  "$r6",  "$r7",
++    "$r8",  "$r9",  "$r10", "$r11", "$r12", "$r13", "$r14", "$r15",
++    "$r16", "$r17", "$r18", "$r19", "$r20", "$r21", "$r22", "$r23",
++    "$r24", "$r25", "$r26", "$r27", "$r28", "$r29", "$r30", "$r31",
++    "$f0",  "$f1",  "$f2",  "$f3",  "$f4",  "$f5",  "$f6",  "$f7",
++    "$f8",  "$f9",  "$f10", "$f11", "$f12", "$f13", "$f14", "$f15",
++    "$f16", "$f17", "$f18", "$f19", "$f20", "$f21", "$f22", "$f23",
++    "$f24", "$f25", "$f26", "$f27", "$f28", "$f29", "$f30", "$f31"
++  };
++
++  return MakeVector(names, sizeof(names) / sizeof(names[0]));
++}
++
+ bool DwarfCFIToModule::Entry(size_t offset, uint64_t address, uint64_t length,
+                              uint8_t version, const std::string& augmentation,
+                              unsigned return_address) {
+diff --git a/src/common/dwarf_cfi_to_module.h b/src/common/dwarf_cfi_to_module.h
+index 3fdef9fa023854030fd8fc6017a7b9a02d245621..dc39e868bf677095af1a89b6fe532bad03432ce6 100644
+--- a/src/common/dwarf_cfi_to_module.h
++++ b/src/common/dwarf_cfi_to_module.h
+@@ -116,6 +116,9 @@ class DwarfCFIToModule: public CallFrameInfo::Handler {
+     // RISC-V.
+     static vector<std::string> RISCV();
+ 
++    // LoongArch64.
++    static vector<std::string> LOONG64();
++
+    private:
+     // Given STRINGS, an array of C strings with SIZE elements, return an
+     // equivalent vector<std::string>.
+diff --git a/src/common/linux/dump_symbols.cc b/src/common/linux/dump_symbols.cc
+index 0056bc145b8d0e7245f7e0c774cbdd7d3f87ebf7..db1da00b7f12c3df17660e31b7f7ccd8cc14389f 100644
+--- a/src/common/linux/dump_symbols.cc
++++ b/src/common/linux/dump_symbols.cc
+@@ -110,6 +110,12 @@ using google_breakpad::wasteful_vector;
+ #define EM_AARCH64      183
+ #endif
+ 
++// Define LoongArch ELF architecture if host machine does not include this
++// define.
++#ifndef EM_LOONGARCH
++#define EM_LOONGARCH    258
++#endif
++
+ // Define ZStd compression if host machine does not include this define.
+ #ifndef ELFCOMPRESS_ZSTD
+ #define ELFCOMPRESS_ZSTD 2
+@@ -535,6 +541,9 @@ bool DwarfCFIRegisterNames(const typename ElfClass::Ehdr* elf_header,
+     case EM_RISCV:
+       *register_names = DwarfCFIToModule::RegisterNames::RISCV();
+       return true;
++    case EM_LOONGARCH:
++      *register_names = DwarfCFIToModule::RegisterNames::LOONG64();
++      return true;
+     default:
+       return false;
+   }
+@@ -1099,6 +1108,7 @@ const char* ElfArchitecture(const typename ElfClass::Ehdr* elf_header) {
+     case EM_SPARCV9:    return "sparcv9";
+     case EM_X86_64:     return "x86_64";
+     case EM_RISCV:      return "riscv";
++    case EM_LOONGARCH:  return "loong64";
+     case EM_NDS32:      return "nds32";
+     default: return nullptr;
+   }
+diff --git a/src/common/linux/memory_mapped_file.cc b/src/common/linux/memory_mapped_file.cc
+index 9b1d5ab7646374a974a9c99106efb3a1170e0702..b6c1e3fcc01d081316d3719abd48f7bf6ca1cc6e 100644
+--- a/src/common/linux/memory_mapped_file.cc
++++ b/src/common/linux/memory_mapped_file.cc
+@@ -72,7 +72,8 @@ bool MemoryMappedFile::Map(const char* path, size_t offset) {
+ 
+ #if defined(__x86_64__) || defined(__aarch64__) || \
+    (defined(__mips__) && _MIPS_SIM == _ABI64) || \
+-   (defined(__riscv) && __riscv_xlen == 64)
++   (defined(__riscv) && __riscv_xlen == 64) || \
++   defined(__loongarch_lp64)
+ 
+   struct kernel_stat st;
+   __builtin_memset(&st, 0, sizeof(st));
